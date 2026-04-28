@@ -1,0 +1,209 @@
+version: 2.1
+
+orbs:
+  node: circleci/node@5.1.0
+  coveralls: coveralls/coveralls@2.2.1
+
+executors:
+  node-postgres:
+    docker:
+      - image: cimg/node:18.19.0
+        environment:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://mofresh_test:test_password@localhost:5432/mofresh_test_db
+          JWT_SECRET: test-jwt-secret-minimum-32-characters-long-for-testing
+          JWT_REFRESH_SECRET: test-refresh-secret-minimum-32-characters-for-testing
+          JWT_EXPIRES_IN: 1h
+          JWT_REFRESH_EXPIRES_IN: 7d
+          BCRYPT_ROUNDS: 4
+          THROTTLE_TTL: 60
+          THROTTLE_LIMIT: 100
+      - image: cimg/postgres:15.5
+        environment:
+          POSTGRES_USER: mofresh_test
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: mofresh_test_db
+
+jobs:
+  install-dependencies:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "package-lock.json" }}
+            - v1-dependencies-
+      - run:
+          name: Install Dependencies
+          command: npm ci
+      - save_cache:
+          key: v1-dependencies-{{ checksum "package-lock.json" }}
+          paths:
+            - node_modules
+      - persist_to_workspace:
+          root: .
+          paths:
+            - node_modules
+
+  lint:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - attach_workspace:
+          at: .
+      - run:
+          name: Run ESLint
+          command: npm run lint
+
+  test:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - attach_workspace:
+          at: .
+      - run:
+          name: Wait for PostgreSQL
+          command: |
+            for i in {1..30}; do
+              if pg_isready -h localhost -p 5432 -U mofresh_test; then
+                echo "PostgreSQL is ready!"
+                break
+              fi
+              echo "Waiting for PostgreSQL... ($i/30)"
+              sleep 2
+            done
+      - run:
+          name: Generate Prisma Client
+          command: npx prisma generate
+      - run:
+          name: Run Database Migrations
+          command: npx prisma migrate deploy
+      - run:
+          name: Run Unit Tests with Coverage
+          command: npm run test:cov
+      - run:
+          name: Run E2E Tests
+          command: npm run test:e2e
+      - store_test_results:
+          path: ./coverage
+      - store_artifacts:
+          path: ./coverage
+          destination: coverage
+      - persist_to_workspace:
+          root: .
+          paths:
+            - coverage
+
+  sonarqube:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - attach_workspace:
+          at: .
+      - run:
+          name: Install SonarScanner
+          command: |
+            wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+            unzip sonar-scanner-cli-5.0.1.3006-linux.zip
+            echo 'export PATH="$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH"' >> $BASH_ENV
+            source $BASH_ENV
+      - run:
+          name: Run SonarQube Analysis
+          command: |
+            if [ -n "$SONAR_TOKEN" ]; then
+              sonar-scanner \
+                -Dsonar.projectKey=mofresh-backend \
+                -Dsonar.sources=src \
+                -Dsonar.host.url=${SONAR_HOST_URL:-https://sonarcloud.io} \
+                -Dsonar.organization=${SONAR_ORGANIZATION} \
+                -Dsonar.login=$SONAR_TOKEN \
+                -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                -Dsonar.typescript.lcov.reportPaths=coverage/lcov.info \
+                -Dsonar.coverage.exclusions="**/*.spec.ts,**/*.test.ts,**/test/**,**/dist/**,**/node_modules/**"
+            else
+              echo "SONAR_TOKEN not set. Skipping SonarQube analysis."
+              echo "Configure SONAR_TOKEN in CircleCI project settings to enable."
+            fi
+
+  coveralls:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - attach_workspace:
+          at: .
+      - run:
+          name: Upload Coverage to Coveralls
+          command: |
+            if [ -n "$COVERALLS_REPO_TOKEN" ]; then
+              npx coveralls < coverage/lcov.info
+            else
+              echo "COVERALLS_REPO_TOKEN not set. Skipping Coveralls upload."
+              echo "Configure COVERALLS_REPO_TOKEN in CircleCI project settings to enable."
+            fi
+
+  build:
+    executor: node-postgres
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone https://github.com/Solvit-Africa-Training-Center/mofresh-backend.git .
+            git checkout ${CIRCLE_BRANCH:-main}
+      - attach_workspace:
+          at: .
+      - run:
+          name: Generate Prisma Client
+          command: npx prisma generate
+      - run:
+          name: Build Application
+          command: npm run build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+
+workflows:
+  version: 2
+  build-test-deploy:
+    jobs:
+      - install-dependencies
+      - lint:
+          requires:
+            - install-dependencies
+      - test:
+          requires:
+            - install-dependencies
+      - sonarqube:
+          requires:
+            - test
+          context:
+            - sonarqube
+      - coveralls:
+          requires:
+            - test
+          context:
+            - coveralls
+      - build:
+          requires:
+            - lint
+            - test

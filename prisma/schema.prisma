@@ -1,0 +1,537 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== ENUMS =====
+
+enum UserRole {
+  SUPER_ADMIN
+  SITE_MANAGER
+  SUPPLIER
+  CLIENT
+}
+
+enum AccountType {
+  PERSONAL
+  BUSINESS
+}
+
+enum VendorRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PowerType {
+  GRID
+  OFF_GRID
+  HYBRID
+}
+
+enum AssetStatus {
+  AVAILABLE
+  RENTED
+  IN_USE
+  MAINTENANCE
+}
+
+enum ProductStatus {
+  IN_STOCK
+  OUT_OF_STOCK
+}
+
+enum StockMovementType {
+  IN
+  OUT
+}
+
+enum OrderStatus {
+  REQUESTED
+  APPROVED
+  INVOICED
+  COMPLETED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  VOID
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CASH
+}
+
+enum RentalStatus {
+  REQUESTED
+  APPROVED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AssetType {
+  COLD_BOX
+  COLD_PLATE
+  TRICYCLE
+  COLD_ROOM
+}
+
+enum TricycleCategory {
+  DAIRY
+  MEAT
+  FRUITS_VEGETABLES
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  PAYMENT_RECEIVED
+  LOGIN
+  LOGOUT
+}
+
+enum ProductCategory {
+  DAIRY
+  MEAT
+  FRUITS_VEGETABLES
+  SEAFOOD
+  OTHER
+}
+
+// ===== MODELS =====
+
+model User {
+  id                          String       @id @default(uuid())
+  email                       String       @unique
+  password                    String // bcrypt hashed
+  firstName                   String
+  lastName                    String
+  phone                       String       @unique
+  refreshToken                String? //Store the HASHED refresh token here
+  role                        UserRole
+  siteId                      String? // NULL for SUPER_ADMIN
+  isActive                    Boolean      @default(true)
+  isProfileComplete           Boolean      @default(false)
+  accountType                 AccountType?
+  businessName                String?
+  tinNumber                   String?
+  businessCertificateDocument String? // Cloudinary URL
+  nationalIdDocument          String? // Cloudinary URL
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+  deletedAt                   DateTime? // Soft delete
+
+  // Relations
+  site                  Site?           @relation(fields: [siteId], references: [id])
+  managedSite           Site?           @relation("SiteManager")
+  suppliedProducts      Product[]       @relation("SupplierProducts")
+  orders                Order[]         @relation("ClientOrders")
+  rentals               Rental[]        @relation("ClientRentals")
+  auditLogs             AuditLog[]
+  createdStockMovements StockMovement[] @relation("CreatedBy")
+  approvedOrders        Order[]         @relation("ApprovedBy")
+  paymentsMarkedBy      Payment[]       @relation("MarkedPaidBy")
+  otps                  Otp[]           @relation("UserOtps")
+
+  @@index([email])
+  @@index([role])
+  @@index([siteId])
+  @@map("users")
+}
+
+model Otp {
+  id        String   @id @default(uuid())
+  email     String
+  code      String
+  userId    String? // Optional: link to existing user
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User? @relation("UserOtps", fields: [userId], references: [id])
+
+  @@unique([email, code])
+  @@index([email])
+  @@index([userId])
+  @@map("otps")
+}
+
+model Site {
+  id        String    @id @default(uuid())
+  name      String
+  location  String
+  managerId String?   @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  manager    User?       @relation("SiteManager", fields: [managerId], references: [id])
+  users      User[]
+  coldRooms  ColdRoom[]
+  coldBoxes  ColdBox[]
+  coldPlates ColdPlate[]
+  tricycles  Tricycle[]
+  products   Product[]
+  orders     Order[]
+  invoices   Invoice[]
+  rentals    Rental[]
+
+  @@index([managerId])
+  @@map("sites")
+}
+
+model ColdRoom {
+  id              String    @id @default(uuid())
+  name            String
+  siteId          String
+  totalCapacityKg Float
+  usedCapacityKg  Float     @default(0)
+  temperatureMin  Float
+  temperatureMax  Float?
+  powerType       PowerType
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  // Relations
+  site           Site            @relation(fields: [siteId], references: [id])
+  products       Product[]
+  stockMovements StockMovement[]
+  rentals        Rental[]
+
+  @@index([siteId])
+  @@map("cold_rooms")
+}
+
+model ColdBox {
+  id                   String      @id @default(uuid())
+  identificationNumber String      @unique
+  sizeOrCapacity       String
+  siteId               String
+  location             String
+  status               AssetStatus @default(AVAILABLE)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  deletedAt            DateTime?
+  imageUrl             String?
+
+  // Relations
+  site    Site     @relation(fields: [siteId], references: [id])
+  rentals Rental[]
+
+  @@index([siteId])
+  @@index([status])
+  @@map("cold_boxes")
+}
+
+model ColdPlate {
+  id                   String      @id @default(uuid())
+  identificationNumber String      @unique
+  coolingSpecification String
+  siteId               String
+  status               AssetStatus @default(AVAILABLE)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  deletedAt            DateTime?
+  imageUrl             String?
+
+  // Relations
+  site    Site     @relation(fields: [siteId], references: [id])
+  rentals Rental[]
+
+  @@index([siteId])
+  @@index([status])
+  @@map("cold_plates")
+}
+
+model Tricycle {
+  id          String           @id @default(uuid())
+  plateNumber String           @unique
+  siteId      String
+  capacity    String
+  category    TricycleCategory
+  status      AssetStatus      @default(AVAILABLE)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  imageUrl    String?
+
+  // Relations
+  site    Site     @relation(fields: [siteId], references: [id])
+  rentals Rental[]
+
+  @@index([siteId])
+  @@index([status])
+  @@map("tricycles")
+}
+
+model Product {
+  id                  String        @id @default(uuid())
+  name                String
+  category            String?
+  quantityKg          Float
+  unit                String
+  supplierId          String
+  coldRoomId          String
+  sellingPricePerUnit Float
+  siteId              String
+  status              ProductStatus @default(IN_STOCK)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  deletedAt           DateTime?
+  imageUrl            String?
+  description         String?
+
+  // Relations
+  supplier       User            @relation("SupplierProducts", fields: [supplierId], references: [id])
+  coldRoom       ColdRoom        @relation(fields: [coldRoomId], references: [id])
+  site           Site            @relation(fields: [siteId], references: [id])
+  stockMovements StockMovement[]
+  orderItems     OrderItem[]
+
+  @@index([supplierId])
+  @@index([coldRoomId])
+  @@index([siteId])
+  @@index([status])
+  @@map("products")
+}
+
+model StockMovement {
+  id           String            @id @default(uuid())
+  productId    String
+  coldRoomId   String
+  quantityKg   Float
+  movementType StockMovementType
+  reason       String
+  createdBy    String
+  createdAt    DateTime          @default(now())
+
+  // Relations
+  product  Product  @relation(fields: [productId], references: [id])
+  coldRoom ColdRoom @relation(fields: [coldRoomId], references: [id])
+  user     User     @relation("CreatedBy", fields: [createdBy], references: [id])
+
+  @@index([productId])
+  @@index([coldRoomId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  clientId        String
+  siteId          String
+  status          OrderStatus @default(REQUESTED)
+  totalAmount     Float
+  deliveryAddress String
+  notes           String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  // Relations
+  client   User        @relation("ClientOrders", fields: [clientId], references: [id])
+  site     Site        @relation(fields: [siteId], references: [id])
+  approver User?       @relation("ApprovedBy", fields: [approvedBy], references: [id])
+  items    OrderItem[]
+  invoice  Invoice?
+
+  @@index([clientId])
+  @@index([siteId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  productId  String
+  quantityKg Float
+  unitPrice  Float
+  subtotal   Float
+  createdAt  DateTime @default(now())
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  orderId       String?       @unique // NULL for rental invoices
+  rentalId      String?       @unique
+  clientId      String
+  siteId        String
+  subtotal      Float
+  taxAmount     Float         @default(0)
+  totalAmount   Float
+  paidAmount    Float         @default(0)
+  status        InvoiceStatus @default(UNPAID)
+  dueDate       DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+
+  // Relations
+  order    Order?        @relation(fields: [orderId], references: [id])
+  rental   Rental?       @relation(fields: [rentalId], references: [id])
+  site     Site          @relation(fields: [siteId], references: [id])
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([invoiceNumber])
+  @@index([clientId])
+  @@index([siteId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Float
+  unit        String
+  unitPrice   Float
+  subtotal    Float
+  createdAt   DateTime @default(now())
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id                   String        @id @default(uuid())
+  invoiceId            String
+  amount               Float
+  paymentMethod        PaymentMethod
+  status               PaymentStatus @default(PENDING)
+  momoTransactionRef   String?       @unique
+  transactionReference String?
+  phoneNumber          String?
+  notes                String?
+  paidAt               DateTime?
+  markedPaidBy         String? // User who manually marked as paid
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relations
+  invoice          Invoice @relation(fields: [invoiceId], references: [id])
+  markedPaidByUser User?   @relation("MarkedPaidBy", fields: [markedPaidBy], references: [id])
+
+  @@index([invoiceId])
+  @@index([status])
+  @@index([momoTransactionRef])
+  @@map("payments")
+}
+
+model Rental {
+  id               String       @id @default(uuid())
+  clientId         String
+  siteId           String
+  assetType        AssetType
+  coldBoxId        String?
+  coldPlateId      String?
+  tricycleId       String?
+  coldRoomId       String?
+  status           RentalStatus @default(REQUESTED)
+  rentalStartDate  DateTime
+  rentalEndDate    DateTime
+  estimatedFee     Float
+  actualFee        Float?
+  capacityNeededKg Float?
+  approvedAt       DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  client    User       @relation("ClientRentals", fields: [clientId], references: [id])
+  site      Site       @relation(fields: [siteId], references: [id])
+  coldBox   ColdBox?   @relation(fields: [coldBoxId], references: [id])
+  coldPlate ColdPlate? @relation(fields: [coldPlateId], references: [id])
+  tricycle  Tricycle?  @relation(fields: [tricycleId], references: [id])
+  coldRoom  ColdRoom?  @relation(fields: [coldRoomId], references: [id])
+  invoice   Invoice?
+
+  @@index([clientId])
+  @@index([siteId])
+  @@index([status])
+  @@index([coldBoxId])
+  @@index([coldPlateId])
+  @@index([tricycleId])
+  @@index([coldRoomId])
+  @@map("rentals")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  entityType String // ORDER, INVOICE, PAYMENT, STOCK_MOVEMENT, etc.
+  entityId   String
+  action     AuditAction
+  userId     String
+  details    Json? // Flexible JSON for storing relevant data
+  timestamp  DateTime    @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+model VendorRequest {
+  id           String              @id @default(uuid())
+  email        String
+  phone        String
+  description  String?
+  replyMessage String?
+  status       VendorRequestStatus @default(PENDING)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  @@index([email])
+  @@index([status])
+  @@map("vendor_requests")
+}

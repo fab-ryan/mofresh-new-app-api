@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database
+*.db
+*.db-journal
+
+# Tests & Coverage
+coverage/
+.nyc_output
+test-results/
+junit.xml
+
+# IDE & System
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# CI/CD
+.sonar/
+.scannerwork/
+
+# Docker
+.docker/
+
+# Misc
+.eslintcache
+.cache
